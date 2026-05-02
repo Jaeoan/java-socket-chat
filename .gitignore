@@ -1,0 +1,15 @@
+# 컴파일된 클래스 파일
+*.class
+
+# 빌드 폴더
+bin/
+out/
+
+# IDE 설정
+.vscode/
+.idea/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
