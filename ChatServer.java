@@ -3,38 +3,39 @@ import java.net.*;
 import java.util.*;
 import java.util.concurrent.*;
 
-/**
- * ChatServer.java
- * ---------------
- * 여러 클라이언트가 동시에 접속할 수 있는 TCP 소켓 채팅 서버.
- * Railway 환경변수 PORT 를 읽어서 0.0.0.0 에 바인딩한다.
- *
- * 실행:
- *   javac -encoding UTF-8 ChatServer.java
- *   java ChatServer
- */
 public class ChatServer {
 
-    // 접속 중인 클라이언트를 thread-safe 하게 보관
     private static final ConcurrentHashMap<String, PrintWriter> clients = new ConcurrentHashMap<>();
 
+    // ── 게임 상태 ──────────────────────────────────────────────────────────────
+    enum GamePhase { WAITING, DESCRIBING, VOTING }
+
+    static volatile GamePhase gamePhase = GamePhase.WAITING;
+    static final Object gameLock = new Object();
+
+    static final String[] WORDS = {"사과", "자동차", "바다", "피자", "강아지"};
+
+    static List<String> playerOrder = new ArrayList<>(); // 순서대로 번호 배정, "AI" 포함
+    static int aiIndex = -1;          // playerOrder 에서 AI 위치 (0-based)
+    static String currentWord = "";
+    static volatile int currentTurn = 0;
+
+    static final ConcurrentHashMap<String, Integer> votes = new ConcurrentHashMap<>();
+
+    // ── 서버 진입점 ────────────────────────────────────────────────────────────
     public static void main(String[] args) throws IOException {
-        // Railway 환경변수 PORT 를 읽는다. 없으면 기본값 8080
         int port = 8080;
         String envPort = System.getenv("PORT");
         if (envPort != null && !envPort.isEmpty()) {
             port = Integer.parseInt(envPort);
         }
 
-        // 0.0.0.0 으로 바인딩 (Railway 필수)
         ServerSocket serverSocket = new ServerSocket(port, 50, InetAddress.getByName("0.0.0.0"));
-        System.out.println("[서버] 채팅 서버 시작 - 포트: " + port);
+        System.out.println("[서버] 시작 - 포트: " + port);
 
         try {
             while (true) {
                 Socket clientSocket = serverSocket.accept();
-                System.out.println("[서버] 새 연결 시도: " + clientSocket.getRemoteSocketAddress());
-                // 클라이언트마다 별도 스레드로 처리
                 Thread t = new Thread(new ClientHandler(clientSocket));
                 t.setDaemon(true);
                 t.start();
@@ -44,110 +45,344 @@ public class ChatServer {
         }
     }
 
-    // 모든 클라이언트에게 메시지를 전송 (broadcast)
-    static void broadcast(String message) {
-        System.out.println("[broadcast] " + message);
-        for (PrintWriter writer : clients.values()) {
-            writer.println(message);
-        }
+    // ── 전송 유틸 ──────────────────────────────────────────────────────────────
+    static void broadcast(String msg) {
+        System.out.println("[broadcast] " + msg);
+        for (PrintWriter w : clients.values()) w.println(msg);
     }
 
-    // 특정 닉네임을 제외하고 broadcast
-    static void broadcastExcept(String excludeNickname, String message) {
-        System.out.println("[broadcast] " + message);
-        clients.forEach((nickname, writer) -> {
-            if (!nickname.equals(excludeNickname)) {
-                writer.println(message);
-            }
-        });
+    static void sendTo(String nickname, String msg) {
+        PrintWriter w = clients.get(nickname);
+        if (w != null) w.println(msg);
     }
 
-    // 접속자 목록을 문자열로 반환
     static String getUserList() {
         Set<String> names = clients.keySet();
-        if (names.isEmpty()) {
-            return "[서버] 현재 접속자가 없습니다.";
-        }
-        return "[서버] 현재 접속자 (" + names.size() + "명): " + String.join(", ", names);
+        if (names.isEmpty()) return "[서버] 접속자 없음";
+        return "[서버] 접속자 (" + names.size() + "명): " + String.join(", ", names);
     }
 
-    // -------------------------------------------------------------------------
-    // 클라이언트 1명을 담당하는 스레드
-    // -------------------------------------------------------------------------
+    // ── 게임 시작 ──────────────────────────────────────────────────────────────
+    static void startGame(String requester) {
+        synchronized (gameLock) {
+            if (gamePhase != GamePhase.WAITING) {
+                sendTo(requester, "[서버] 이미 게임이 진행 중입니다.");
+                return;
+            }
+            List<String> humans = new ArrayList<>(clients.keySet());
+            if (humans.size() < 2) {
+                sendTo(requester, "[서버] 2명 이상이어야 시작할 수 있습니다.");
+                return;
+            }
+
+            Collections.shuffle(humans);
+            currentWord = WORDS[new Random().nextInt(WORDS.length)];
+
+            // AI를 랜덤 위치에 끼워 넣기
+            aiIndex = new Random().nextInt(humans.size() + 1);
+            playerOrder = new ArrayList<>(humans);
+            playerOrder.add(aiIndex, "AI");
+
+            currentTurn = 0;
+            votes.clear();
+            gamePhase = GamePhase.DESCRIBING;
+
+            broadcast("[게임] ══════════ 게임 시작! ══════════");
+            broadcast("[게임] 단어: 【" + currentWord + "】");
+            broadcast("[게임] 이 단어를 설명하는 사람 중 AI가 섞여 있습니다!");
+            broadcast("[게임] 설명이 끝나면 /투표 [번호] 로 AI를 지목하세요.");
+            broadcast("");
+
+            // 참가자에게 자신의 번호 비공개 전송
+            for (int i = 0; i < playerOrder.size(); i++) {
+                String p = playerOrder.get(i);
+                if (!p.equals("AI")) {
+                    sendTo(p, "[게임] ★ 당신은 " + (i + 1) + "번 플레이어입니다. 비밀로 하세요! ★");
+                }
+            }
+            broadcast("[게임] 총 " + playerOrder.size() + "명이 참가합니다. (1번 ~ " + playerOrder.size() + "번)");
+        }
+        announceTurn();
+    }
+
+    // ── 차례 안내 ──────────────────────────────────────────────────────────────
+    static void announceTurn() {
+        int turn;
+        String player;
+        synchronized (gameLock) {
+            if (gamePhase != GamePhase.DESCRIBING) return;
+            if (currentTurn >= playerOrder.size()) {
+                startVoting();
+                return;
+            }
+            turn = currentTurn;
+            player = playerOrder.get(turn);
+        }
+
+        int num = turn + 1;
+        if (player.equals("AI")) {
+            broadcast("[게임] " + num + "번 플레이어의 차례입니다...");
+            // AI가 자동으로 설명 생성
+            new Thread(() -> {
+                try { Thread.sleep(2000); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+                String desc = getAIDescription(currentWord);
+                broadcast("[" + num + "번] " + desc);
+                try { Thread.sleep(800); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+                synchronized (gameLock) { currentTurn++; }
+                announceTurn();
+            }).start();
+        } else {
+            broadcast("[게임] " + num + "번 【" + player + "】님의 차례입니다. 단어를 설명해주세요!");
+        }
+    }
+
+    // ── 설명 처리 ──────────────────────────────────────────────────────────────
+    static void handleDescription(String nickname, String msg) {
+        boolean advance = false;
+        int num = -1;
+        synchronized (gameLock) {
+            if (gamePhase != GamePhase.DESCRIBING) return;
+            if (currentTurn >= playerOrder.size()) return;
+
+            String curPlayer = playerOrder.get(currentTurn);
+            if (curPlayer.equals("AI")) {
+                sendTo(nickname, "[서버] AI가 생각 중입니다. 잠시만 기다려주세요.");
+                return;
+            }
+            if (!curPlayer.equals(nickname)) {
+                sendTo(nickname, "[서버] 지금은 " + (currentTurn + 1) + "번 플레이어의 차례입니다.");
+                return;
+            }
+            num = currentTurn + 1;
+            currentTurn++;
+            advance = true;
+        }
+        if (advance) {
+            broadcast("[" + num + "번] " + msg);
+            announceTurn();
+        }
+    }
+
+    // ── 투표 시작 ──────────────────────────────────────────────────────────────
+    static void startVoting() {
+        synchronized (gameLock) {
+            gamePhase = GamePhase.VOTING;
+        }
+        broadcast("");
+        broadcast("[게임] ══════════ 투표 시작! ══════════");
+        broadcast("[게임] AI라고 생각하는 번호를 입력하세요: /투표 [번호]");
+        broadcast("[게임] 모두 투표하면 결과가 공개됩니다!");
+    }
+
+    // ── 투표 처리 ──────────────────────────────────────────────────────────────
+    static void handleVote(String nickname, int voteNum) {
+        synchronized (gameLock) {
+            if (gamePhase != GamePhase.VOTING) {
+                sendTo(nickname, "[서버] 지금은 투표 시간이 아닙니다.");
+                return;
+            }
+            if (voteNum < 1 || voteNum > playerOrder.size()) {
+                sendTo(nickname, "[서버] 올바른 번호를 입력하세요. (1 ~ " + playerOrder.size() + ")");
+                return;
+            }
+            if (votes.containsKey(nickname)) {
+                sendTo(nickname, "[서버] 이미 투표했습니다.");
+                return;
+            }
+            votes.put(nickname, voteNum);
+            int humanCount = playerOrder.size() - 1;
+            broadcast("[투표] " + nickname + "님 투표 완료 (" + votes.size() + "/" + humanCount + ")");
+
+            if (votes.size() >= humanCount) {
+                revealResult();
+            }
+        }
+    }
+
+    // ── 결과 공개 ──────────────────────────────────────────────────────────────
+    static void revealResult() {
+        // 가장 많이 투표받은 번호 집계
+        Map<Integer, Integer> tally = new HashMap<>();
+        for (int v : votes.values()) tally.merge(v, 1, Integer::sum);
+
+        int maxVotes = 0, mostVoted = -1;
+        for (Map.Entry<Integer, Integer> e : tally.entrySet()) {
+            if (e.getValue() > maxVotes) {
+                maxVotes = e.getValue();
+                mostVoted = e.getKey();
+            }
+        }
+
+        boolean correct = (mostVoted == aiIndex + 1);
+
+        broadcast("");
+        broadcast("[게임] ══════════ 결과 발표! ══════════");
+        broadcast("[게임] 가장 많은 표: " + mostVoted + "번 (" + maxVotes + "표)");
+        broadcast("[게임] AI는 " + (aiIndex + 1) + "번이었습니다!");
+        broadcast("");
+        if (correct) {
+            broadcast("[게임] ★★★ 인간 승리! AI를 찾아냈습니다! ★★★");
+        } else {
+            broadcast("[게임] ☆☆☆ AI 승리! AI가 살아남았습니다! ☆☆☆");
+        }
+        broadcast("[게임] 다시 하려면 /시작 을 입력하세요.");
+
+        // 게임 초기화
+        gamePhase = GamePhase.WAITING;
+        playerOrder.clear();
+        votes.clear();
+        aiIndex = -1;
+    }
+
+    // ── OpenAI API 호출 ────────────────────────────────────────────────────────
+    static String getAIDescription(String word) {
+        String apiKey = System.getenv("OPENAI_API_KEY");
+        if (apiKey == null || apiKey.isEmpty()) {
+            return "음... 이건 일상에서 자주 접하는 것인데, 설명하기가 조금 어렵네요.";
+        }
+        try {
+            URL url = new URL("https://api.openai.com/v1/chat/completions");
+            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("POST");
+            conn.setRequestProperty("Authorization", "Bearer " + apiKey);
+            conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
+            conn.setDoOutput(true);
+            conn.setConnectTimeout(10000);
+            conn.setReadTimeout(15000);
+
+            String prompt =
+                "당신은 '라이어 게임'에서 사람인 척 해야 하는 AI입니다. " +
+                "주어진 단어를 단어 자체를 언급하지 않고, " +
+                "자연스럽지만 약간 어색하게 2~3문장으로 설명하세요. " +
+                "너무 완벽하게 설명하지 말고, 사람인 척 자연스럽게 말하세요. " +
+                "단어: " + word;
+
+            String body = "{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"user\",\"content\":\""
+                    + escapeJson(prompt) + "\"}],\"max_tokens\":150}";
+
+            try (OutputStream os = conn.getOutputStream()) {
+                os.write(body.getBytes("UTF-8"));
+            }
+
+            StringBuilder resp = new StringBuilder();
+            try (BufferedReader br = new BufferedReader(
+                    new InputStreamReader(conn.getInputStream(), "UTF-8"))) {
+                String line;
+                while ((line = br.readLine()) != null) resp.append(line);
+            }
+
+            return extractContent(resp.toString());
+
+        } catch (Exception e) {
+            System.out.println("[AI 오류] " + e.getMessage());
+            return "음... 이건 설명하기 어렵지만, 우리 생활에서 흔히 볼 수 있어요.";
+        }
+    }
+
+    static String extractContent(String json) {
+        int idx = json.indexOf("\"content\":");
+        if (idx < 0) return "...";
+        int start = json.indexOf("\"", idx + 10) + 1;
+        StringBuilder sb = new StringBuilder();
+        int i = start;
+        while (i < json.length()) {
+            char c = json.charAt(i);
+            if (c == '\\' && i + 1 < json.length()) {
+                char next = json.charAt(i + 1);
+                if (next == '"') sb.append('"');
+                else if (next == 'n') sb.append(' ');
+                else if (next == '\\') sb.append('\\');
+                else sb.append(next);
+                i += 2;
+            } else if (c == '"') {
+                break;
+            } else {
+                sb.append(c);
+                i++;
+            }
+        }
+        return sb.toString().trim();
+    }
+
+    static String escapeJson(String s) {
+        return s.replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\n", "\\n")
+                .replace("\r", "\\r")
+                .replace("\t", "\\t");
+    }
+
+    // ── 클라이언트 핸들러 ──────────────────────────────────────────────────────
     static class ClientHandler implements Runnable {
 
         private final Socket socket;
         private String nickname;
         private PrintWriter out;
 
-        ClientHandler(Socket socket) {
-            this.socket = socket;
-        }
+        ClientHandler(Socket socket) { this.socket = socket; }
 
         @Override
         public void run() {
             try {
-                // UTF-8 스트림 설정
                 BufferedReader in = new BufferedReader(
                         new InputStreamReader(socket.getInputStream(), "UTF-8"));
                 out = new PrintWriter(
                         new OutputStreamWriter(socket.getOutputStream(), "UTF-8"), true);
 
-                // ── 1단계: 닉네임 받기 ──────────────────────────────────────
+                // 닉네임 등록
                 out.println("[서버] 닉네임을 입력하세요 (최대 20자):");
                 String raw = in.readLine();
-                if (raw == null) return; // 연결 끊김
+                if (raw == null) return;
 
-                // 닉네임 정리 및 길이 제한
                 nickname = raw.trim().replaceAll("\\s+", "_");
                 if (nickname.isEmpty()) nickname = "익명";
                 if (nickname.length() > 20) nickname = nickname.substring(0, 20);
 
-                // 중복 닉네임 처리
                 if (clients.containsKey(nickname)) {
                     out.println("[서버] 이미 사용 중인 닉네임입니다. 연결을 종료합니다.");
                     socket.close();
                     return;
                 }
 
-                // 클라이언트 등록
                 clients.put(nickname, out);
-                System.out.println("[서버] 입장: " + nickname + " / 현재 " + clients.size() + "명");
+                out.println("[서버] 환영합니다, " + nickname + "님!");
+                out.println("[서버] 명령어: /시작  /투표 [번호]  /users  /quit");
+                broadcast("[입장] " + nickname + "님 입장. (현재 " + clients.size() + "명)");
 
-                out.println("[서버] 환영합니다, " + nickname + "님! 채팅방에 입장했습니다.");
-                out.println("[서버] 명령어: /users (접속자 목록)  /quit (나가기)");
-                broadcast("[입장] " + nickname + "님이 채팅방에 들어왔습니다.");
-
-                // ── 2단계: 메시지 수신 루프 ─────────────────────────────────
+                // 메시지 루프
                 String line;
                 while ((line = in.readLine()) != null) {
                     line = line.trim();
-
                     if (line.isEmpty()) continue;
 
                     if (line.equals("/quit")) {
-                        // 정상 퇴장
                         break;
                     } else if (line.equals("/users")) {
-                        // 접속자 목록은 요청한 클라이언트에게만 전송
                         out.println(getUserList());
-                    } else {
-                        // 일반 메시지: 500자 제한
-                        if (line.length() > 500) {
-                            line = line.substring(0, 500) + "...(생략)";
+                    } else if (line.equals("/시작")) {
+                        startGame(nickname);
+                    } else if (line.startsWith("/투표 ")) {
+                        try {
+                            int num = Integer.parseInt(line.substring(4).trim());
+                            handleVote(nickname, num);
+                        } catch (NumberFormatException e) {
+                            out.println("[서버] 사용법: /투표 [번호]");
                         }
+                    } else if (gamePhase == GamePhase.DESCRIBING) {
+                        if (line.length() > 200) line = line.substring(0, 200) + "...";
+                        handleDescription(nickname, line);
+                    } else {
+                        if (line.length() > 500) line = line.substring(0, 500) + "...";
                         broadcast("[" + nickname + "] " + line);
                     }
                 }
 
             } catch (IOException e) {
-                System.out.println("[서버] 연결 오류 (" + nickname + "): " + e.getMessage());
+                System.out.println("[서버] 오류 (" + nickname + "): " + e.getMessage());
             } finally {
-                // ── 3단계: 정리 ─────────────────────────────────────────────
                 if (nickname != null) {
                     clients.remove(nickname);
-                    System.out.println("[서버] 퇴장: " + nickname + " / 현재 " + clients.size() + "명");
-                    broadcast("[퇴장] " + nickname + "님이 채팅방에서 나갔습니다.");
+                    broadcast("[퇴장] " + nickname + "님 퇴장. (현재 " + clients.size() + "명)");
                 }
                 try { socket.close(); } catch (IOException ignored) {}
             }
