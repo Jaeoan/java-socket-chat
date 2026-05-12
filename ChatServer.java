@@ -258,14 +258,13 @@ public class ChatServer {
     };
 
     static String getAIDescription(String word) {
-        String apiKey = System.getenv("OPENAI_API_KEY");
+        String apiKey = System.getenv("GROQ_API_KEY");
         if (apiKey == null || apiKey.isEmpty()) {
-            System.out.println("[AI 오류] OPENAI_API_KEY 환경변수가 없음");
+            System.out.println("[AI 오류] GROQ_API_KEY 환경변수가 없음");
             return FALLBACKS[new Random().nextInt(FALLBACKS.length)];
         }
-        System.out.println("[AI] 키 앞 10자: " + apiKey.substring(0, Math.min(10, apiKey.length())));
         try {
-            URL url = new URL("https://api.openai.com/v1/chat/completions");
+            URL url = new URL("https://api.groq.com/openai/v1/chat/completions");
             HttpURLConnection conn = (HttpURLConnection) url.openConnection();
             conn.setRequestMethod("POST");
             conn.setRequestProperty("Authorization", "Bearer " + apiKey);
@@ -282,7 +281,7 @@ public class ChatServer {
                 "예시: '이거 어릴 때 자주 먹었는데 되게 달달해', '도로에서 보면 진짜 멋있잖아 빠르고' " +
                 "단어: " + word;
 
-            String body = "{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"user\",\"content\":\""
+            String body = "{\"model\":\"llama-3.3-70b-versatile\",\"messages\":[{\"role\":\"user\",\"content\":\""
                     + escapeJson(prompt) + "\"}],\"max_tokens\":150}";
 
             try (OutputStream os = conn.getOutputStream()) {
@@ -290,8 +289,6 @@ public class ChatServer {
             }
 
             int status = conn.getResponseCode();
-            System.out.println("[AI] HTTP 상태코드: " + status);
-
             if (status != 200) {
                 StringBuilder err = new StringBuilder();
                 try (BufferedReader br = new BufferedReader(
@@ -299,7 +296,7 @@ public class ChatServer {
                     String line;
                     while ((line = br.readLine()) != null) err.append(line);
                 }
-                System.out.println("[AI 오류] 응답 본문: " + err);
+                System.out.println("[AI 오류] " + status + " - " + err);
                 return FALLBACKS[new Random().nextInt(FALLBACKS.length)];
             }
 
@@ -310,7 +307,6 @@ public class ChatServer {
                 while ((line = br.readLine()) != null) resp.append(line);
             }
 
-            System.out.println("[AI] 응답: " + resp.toString().substring(0, Math.min(200, resp.length())));
             return extractContent(resp.toString());
 
         } catch (Exception e) {
