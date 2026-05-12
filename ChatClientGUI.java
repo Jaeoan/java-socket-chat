@@ -107,9 +107,49 @@ public class ChatClientGUI extends JFrame {
         sendButton.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         sendButton.addActionListener(e -> sendMessage());
 
+        // 게임 버튼 패널
+        JPanel buttonPanel = new JPanel(new GridLayout(1, 2, 4, 0));
+        buttonPanel.setBackground(new Color(20, 20, 30));
+
+        JButton startButton = new JButton("게임 시작");
+        startButton.setBackground(new Color(60, 160, 80));
+        startButton.setForeground(Color.WHITE);
+        startButton.setFont(new Font("맑은 고딕", Font.BOLD, 12));
+        startButton.setFocusPainted(false);
+        startButton.setBorder(BorderFactory.createEmptyBorder(6, 8, 6, 8));
+        startButton.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        startButton.addActionListener(e -> {
+            if (serverOut != null) serverOut.println("/시작");
+        });
+
+        JButton voteButton = new JButton("AI 투표");
+        voteButton.setBackground(new Color(160, 80, 60));
+        voteButton.setForeground(Color.WHITE);
+        voteButton.setFont(new Font("맑은 고딕", Font.BOLD, 12));
+        voteButton.setFocusPainted(false);
+        voteButton.setBorder(BorderFactory.createEmptyBorder(6, 8, 6, 8));
+        voteButton.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        voteButton.addActionListener(e -> {
+            String num = JOptionPane.showInputDialog(this, "AI라고 생각하는 번호를 입력하세요:", "투표", JOptionPane.PLAIN_MESSAGE);
+            if (num != null && !num.trim().isEmpty()) {
+                if (serverOut != null) serverOut.println("/투표 " + num.trim());
+            }
+        });
+
+        buttonPanel.add(startButton);
+        buttonPanel.add(voteButton);
+
         inputPanel.add(inputField, BorderLayout.CENTER);
         inputPanel.add(sendButton, BorderLayout.EAST);
-        add(inputPanel, BorderLayout.SOUTH);
+
+        JPanel southPanel = new JPanel(new BorderLayout(0, 4));
+        southPanel.setBackground(new Color(20, 20, 30));
+        southPanel.setBorder(BorderFactory.createEmptyBorder(8, 10, 10, 10));
+        southPanel.add(buttonPanel, BorderLayout.NORTH);
+        southPanel.add(inputPanel, BorderLayout.CENTER);
+        inputPanel.setBorder(null);
+
+        add(southPanel, BorderLayout.SOUTH);
 
         // 창 닫을 때 /quit 전송
         addWindowListener(new WindowAdapter() {
