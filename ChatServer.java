@@ -205,7 +205,7 @@ public class ChatServer {
             }
             votes.put(nickname, voteNum);
             int humanCount = playerOrder.size() - 1;
-            broadcast("[투표] " + nickname + "님 투표 완료 (" + votes.size() + "/" + humanCount + ")");
+            broadcast("[투표] 투표 완료 (" + votes.size() + "/" + humanCount + ")");
 
             if (votes.size() >= humanCount) {
                 revealResult();
@@ -249,10 +249,18 @@ public class ChatServer {
     }
 
     // ── OpenAI API 호출 ────────────────────────────────────────────────────────
+    static final String[] FALLBACKS = {
+        "어 이거 나 진짜 좋아하는데 딱 뭐라 설명이 안 되네",
+        "흔한 건데 어떻게 설명하지... 일상에서 많이 쓰는 거잖아",
+        "이거 나 어릴 때부터 알던 건데 갑자기 설명하려니까 말이 안 나옴",
+        "되게 친숙한 건데 막상 설명하려니까 어렵다",
+        "이거 진짜 자주 보는 건데 설명하기가 생각보다 어렵네"
+    };
+
     static String getAIDescription(String word) {
         String apiKey = System.getenv("OPENAI_API_KEY");
         if (apiKey == null || apiKey.isEmpty()) {
-            return "음... 이건 일상에서 자주 접하는 것인데, 설명하기가 조금 어렵네요.";
+            return FALLBACKS[new Random().nextInt(FALLBACKS.length)];
         }
         try {
             URL url = new URL("https://api.openai.com/v1/chat/completions");
@@ -265,10 +273,11 @@ public class ChatServer {
             conn.setReadTimeout(15000);
 
             String prompt =
-                "당신은 '라이어 게임'에서 사람인 척 해야 하는 AI입니다. " +
-                "주어진 단어를 단어 자체를 언급하지 않고, " +
-                "자연스럽지만 약간 어색하게 2~3문장으로 설명하세요. " +
-                "너무 완벽하게 설명하지 말고, 사람인 척 자연스럽게 말하세요. ~임 ,~했음 이렇게요" +
+                "너는 지금 친구들이랑 라이어 게임 중이야. " +
+                "주어진 단어를 친구한테 말하듯이 짧게 1~2문장으로 설명해. " +
+                "절대 단어를 직접 말하면 안 되고, 20대 한국인처럼 자연스러운 반말로 말해. " +
+                "개인 경험이나 느낌을 섞어도 좋아. 너무 정확하거나 AI처럼 보이면 안 돼. " +
+                "예시: '이거 어릴 때 자주 먹었는데 되게 달달해', '도로에서 보면 진짜 멋있잖아 빠르고' " +
                 "단어: " + word;
 
             String body = "{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"user\",\"content\":\""
@@ -289,7 +298,7 @@ public class ChatServer {
 
         } catch (Exception e) {
             System.out.println("[AI 오류] " + e.getMessage());
-            return "음... 이건 설명하기 어렵지만, 우리 생활에서 흔히 볼 수 있어요.";
+            return FALLBACKS[new Random().nextInt(FALLBACKS.length)];
         }
     }
 
