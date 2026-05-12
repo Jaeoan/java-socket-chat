@@ -260,8 +260,10 @@ public class ChatServer {
     static String getAIDescription(String word) {
         String apiKey = System.getenv("OPENAI_API_KEY");
         if (apiKey == null || apiKey.isEmpty()) {
+            System.out.println("[AI 오류] OPENAI_API_KEY 환경변수가 없음");
             return FALLBACKS[new Random().nextInt(FALLBACKS.length)];
         }
+        System.out.println("[AI] 키 앞 10자: " + apiKey.substring(0, Math.min(10, apiKey.length())));
         try {
             URL url = new URL("https://api.openai.com/v1/chat/completions");
             HttpURLConnection conn = (HttpURLConnection) url.openConnection();
@@ -287,6 +289,20 @@ public class ChatServer {
                 os.write(body.getBytes("UTF-8"));
             }
 
+            int status = conn.getResponseCode();
+            System.out.println("[AI] HTTP 상태코드: " + status);
+
+            if (status != 200) {
+                StringBuilder err = new StringBuilder();
+                try (BufferedReader br = new BufferedReader(
+                        new InputStreamReader(conn.getErrorStream(), "UTF-8"))) {
+                    String line;
+                    while ((line = br.readLine()) != null) err.append(line);
+                }
+                System.out.println("[AI 오류] 응답 본문: " + err);
+                return FALLBACKS[new Random().nextInt(FALLBACKS.length)];
+            }
+
             StringBuilder resp = new StringBuilder();
             try (BufferedReader br = new BufferedReader(
                     new InputStreamReader(conn.getInputStream(), "UTF-8"))) {
@@ -294,10 +310,11 @@ public class ChatServer {
                 while ((line = br.readLine()) != null) resp.append(line);
             }
 
+            System.out.println("[AI] 응답: " + resp.toString().substring(0, Math.min(200, resp.length())));
             return extractContent(resp.toString());
 
         } catch (Exception e) {
-            System.out.println("[AI 오류] " + e.getMessage());
+            System.out.println("[AI 오류] " + e.getClass().getSimpleName() + ": " + e.getMessage());
             return FALLBACKS[new Random().nextInt(FALLBACKS.length)];
         }
     }
