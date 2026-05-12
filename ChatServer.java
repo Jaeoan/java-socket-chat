@@ -134,9 +134,8 @@ public class ChatServer {
         }
 
         int num = turn + 1;
+        broadcast("[게임] " + num + "번 플레이어의 차례입니다. 단어를 설명해주세요!");
         if (player.equals("AI")) {
-            broadcast("[게임] " + num + "번 플레이어의 차례입니다...");
-            // AI가 자동으로 설명 생성
             new Thread(() -> {
                 try { Thread.sleep(2000); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
                 String desc = getAIDescription(currentWord);
@@ -145,8 +144,6 @@ public class ChatServer {
                 synchronized (gameLock) { currentTurn++; }
                 announceTurn();
             }).start();
-        } else {
-            broadcast("[게임] " + num + "번 【" + player + "】님의 차례입니다. 단어를 설명해주세요!");
         }
     }
 
@@ -275,10 +272,10 @@ public class ChatServer {
 
             String prompt =
                 "너는 지금 친구들이랑 라이어 게임 중이야. " +
-                "주어진 단어를 친구한테 말하듯이 짧게 1~2문장으로 설명해. " +
-                "절대 단어를 직접 말하면 안 되고, 20대 한국인처럼 자연스러운 반말로 말해. " +
-                "개인 경험이나 느낌을 섞어도 좋아. 너무 정확하거나 AI처럼 보이면 안 돼. " +
-                "예시: '이거 어릴 때 자주 먹었는데 되게 달달해', '도로에서 보면 진짜 멋있잖아 빠르고' " +
+                "주어진 단어를 친구한테 말하듯이 짧게 1문장으로 설명해. " +
+                "절대 단어를 직접 말하면 안 되고, 10대 비행청소년ㅋㅋ 반말로 말해. " +
+                " 너무 정확하거나 AI처럼 보이면 안 돼. " +
+                "예시: '이거 맛있음', '빨감' 이렇게 설명해 " +
                 "단어: " + word;
 
             String body = "{\"model\":\"llama-3.3-70b-versatile\",\"messages\":[{\"role\":\"user\",\"content\":\""
