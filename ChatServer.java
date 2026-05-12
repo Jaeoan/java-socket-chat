@@ -6,6 +6,7 @@ import java.util.concurrent.*;
 public class ChatServer {
 
     private static final ConcurrentHashMap<String, PrintWriter> clients = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<String, Socket> clientSockets = new ConcurrentHashMap<>();
 
     // ── 게임 상태 ──────────────────────────────────────────────────────────────
     enum GamePhase { WAITING, DESCRIBING, VOTING }
@@ -60,6 +61,19 @@ public class ChatServer {
         Set<String> names = clients.keySet();
         if (names.isEmpty()) return "[서버] 접속자 없음";
         return "[서버] 접속자 (" + names.size() + "명): " + String.join(", ", names);
+    }
+
+    static void kickClient(String target, String by) {
+        Socket s = clientSockets.get(target);
+        if (s == null) {
+            sendTo(by, "[서버] '" + target + "' 님을 찾을 수 없습니다.");
+            return;
+        }
+        try {
+            sendTo(target, "[서버] 강제 퇴장 처리되었습니다.");
+            s.close();
+            broadcast("[서버] " + by + "님이 " + target + "님을 강제 퇴장했습니다.");
+        } catch (IOException ignored) {}
     }
 
     // ── 게임 시작 ──────────────────────────────────────────────────────────────
@@ -254,7 +268,7 @@ public class ChatServer {
                 "당신은 '라이어 게임'에서 사람인 척 해야 하는 AI입니다. " +
                 "주어진 단어를 단어 자체를 언급하지 않고, " +
                 "자연스럽지만 약간 어색하게 2~3문장으로 설명하세요. " +
-                "너무 완벽하게 설명하지 말고, 사람인 척 자연스럽게 말하세요. " +
+                "너무 완벽하게 설명하지 말고, 사람인 척 자연스럽게 말하세요. ~임 ,~했음 이렇게요" +
                 "단어: " + word;
 
             String body = "{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"user\",\"content\":\""
@@ -324,6 +338,7 @@ public class ChatServer {
         @Override
         public void run() {
             try {
+                socket.setSoTimeout(180000); // 3분 무응답 시 자동 종료
                 BufferedReader in = new BufferedReader(
                         new InputStreamReader(socket.getInputStream(), "UTF-8"));
                 out = new PrintWriter(
@@ -345,8 +360,9 @@ public class ChatServer {
                 }
 
                 clients.put(nickname, out);
+                clientSockets.put(nickname, socket);
                 out.println("[서버] 환영합니다, " + nickname + "님!");
-                out.println("[서버] 명령어: /시작  /투표 [번호]  /users  /quit");
+                out.println("[서버] 명령어: /시작  /투표 [번호]  /강퇴 [닉네임]  /users  /quit");
                 broadcast("[입장] " + nickname + "님 입장. (현재 " + clients.size() + "명)");
 
                 // 메시지 루프
@@ -359,6 +375,9 @@ public class ChatServer {
                         break;
                     } else if (line.equals("/users")) {
                         out.println(getUserList());
+                    } else if (line.startsWith("/강퇴 ")) {
+                        String target = line.substring(4).trim();
+                        kickClient(target, nickname);
                     } else if (line.equals("/시작")) {
                         startGame(nickname);
                     } else if (line.startsWith("/투표 ")) {
@@ -382,6 +401,7 @@ public class ChatServer {
             } finally {
                 if (nickname != null) {
                     clients.remove(nickname);
+                    clientSockets.remove(nickname);
                     broadcast("[퇴장] " + nickname + "님 퇴장. (현재 " + clients.size() + "명)");
                 }
                 try { socket.close(); } catch (IOException ignored) {}
