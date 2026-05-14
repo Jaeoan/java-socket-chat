@@ -421,6 +421,16 @@ public class ChatServer {
                     clients.remove(nickname);
                     clientSockets.remove(nickname);
                     broadcast("[퇴장] " + nickname + "님 퇴장. (현재 " + clients.size() + "명)");
+                    synchronized (gameLock) {
+                        if (gamePhase != GamePhase.WAITING) {
+                            gamePhase = GamePhase.WAITING;
+                            playerOrder.clear();
+                            votes.clear();
+                            aiIndex = -1;
+                            currentTurn = 0;
+                            broadcast("[게임] 참가자가 퇴장하여 게임이 취소되었습니다. 다시 /시작 을 입력하세요.");
+                        }
+                    }
                 }
                 try { socket.close(); } catch (IOException ignored) {}
             }
