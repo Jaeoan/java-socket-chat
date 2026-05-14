@@ -192,6 +192,10 @@ public class ChatServer {
                 sendTo(nickname, "[서버] 지금은 투표 시간이 아닙니다.");
                 return;
             }
+            if (!playerOrder.contains(nickname)) {
+                sendTo(nickname, "[서버] 게임 도중 입장하셨습니다. 이번 게임은 투표할 수 없습니다.");
+                return;
+            }
             if (voteNum < 1 || voteNum > playerOrder.size()) {
                 sendTo(nickname, "[서버] 올바른 번호를 입력하세요. (1 ~ " + playerOrder.size() + ")");
                 return;
@@ -382,6 +386,9 @@ public class ChatServer {
                 out.println("[서버] 환영합니다, " + nickname + "님!");
                 out.println("[서버] 명령어: /시작  /투표 [번호]  /강퇴 [닉네임]  /users  /quit");
                 broadcast("[입장] " + nickname + "님 입장. (현재 " + clients.size() + "명)");
+                if (gamePhase != GamePhase.WAITING) {
+                    out.println("[서버] ⚠ 당신은 대기자입니다. 게임이 끝날 때까지 기다려주세요.");
+                }
 
                 // 메시지 루프
                 String line;
@@ -406,6 +413,10 @@ public class ChatServer {
                             out.println("[서버] 사용법: /투표 [번호]");
                         }
                     } else if (gamePhase == GamePhase.DESCRIBING) {
+                        if (!playerOrder.contains(nickname)) {
+                            out.println("[서버] 게임 도중 입장하셨습니다. 게임이 끝난 후 참여할 수 있습니다.");
+                            continue;
+                        }
                         if (line.length() > 200) line = line.substring(0, 200) + "...";
                         handleDescription(nickname, line);
                     } else {
