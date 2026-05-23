@@ -1,7 +1,6 @@
 # Java 소켓 채팅방 (발표용)
+TCP 소켓 채팅 서버/클라이언트 
 
-순수 Java 만으로 만든 TCP 소켓 채팅 서버/클라이언트 
-외부 라이브러리 없이 `java.net.Socket` 만 사용
 
 ---
 
@@ -16,7 +15,7 @@
 
 ---
 
-## 발표용 한 줄 설명 멘트
+
 
 > "이 프로젝트는 순수 Java 소켓으로 구현한 실시간 채팅 서버입니다.  
 > 서버는 Railway에 배포되어 있고, 팀원 누구나 터미널 하나로 접속해서 대화할 수 있습니다.  
@@ -214,21 +213,6 @@ java ChatClientCLI
 railway login
 railway init
 railway up
-
-# Railway 로그 확인
-railway logs
-```
-
-**Railway TCP Proxy 설정:**  
-Internal Port = 8080
-
-**클라이언트 Railway 주소 설정 예시:**
-
-```java
-private static final String SERVER_HOST = "shuttle.proxy.rlwy.net";
-private static final int    SERVER_PORT = 15140;
-```
-
 ---
 
 > 팀원들은 `ChatServer.java` 를 실행하면 안 되고 `ChatClientCLI.java` 만 실행해야 합니다.  
