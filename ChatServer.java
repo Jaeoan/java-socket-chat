@@ -23,6 +23,8 @@ public class ChatServer {
 
     static final ConcurrentHashMap<String, Integer> votes = new ConcurrentHashMap<>();
 
+    static final String ADMIN_NAME = "준태";
+
     // ── 서버 진입점 ────────────────────────────────────────────────────────────
     public static void main(String[] args) throws IOException {
         int port = 8080;
@@ -74,6 +76,20 @@ public class ChatServer {
             s.close();
             broadcast("[서버] " + by + "님이 " + target + "님을 강제 퇴장했습니다.");
         } catch (IOException ignored) {}
+    }
+
+    // ── 게임 초기화 (방장 전용) ────────────────────────────────────────────────
+    static void resetGame(String requester) {
+        synchronized (gameLock) {
+            gamePhase = GamePhase.WAITING;
+            playerOrder.clear();
+            votes.clear();
+            aiIndex = -1;
+            currentTurn = 0;
+            currentWord = "";
+        }
+        broadcast("[게임] ══════════ 방장이 게임을 초기화했습니다 ══════════");
+        broadcast("[게임] 다시 시작하려면 /시작 을 입력하세요.");
     }
 
     // ── 게임 시작 ──────────────────────────────────────────────────────────────
@@ -145,6 +161,20 @@ public class ChatServer {
                 announceTurn();
             }).start();
         }
+    }
+
+    // ── 차례 스킵 (방장 전용) ──────────────────────────────────────────────────
+    static void skipTurn(String requester) {
+        synchronized (gameLock) {
+            if (gamePhase != GamePhase.DESCRIBING) {
+                sendTo(requester, "[서버] 설명 단계에서만 스킵할 수 있습니다.");
+                return;
+            }
+            if (currentTurn >= playerOrder.size()) return;
+            broadcast("[게임] 방장이 " + (currentTurn + 1) + "번 플레이어의 차례를 넘겼습니다.");
+            currentTurn++;
+        }
+        announceTurn();
     }
 
     // ── 설명 처리 ──────────────────────────────────────────────────────────────
@@ -360,7 +390,7 @@ public class ChatServer {
         @Override
         public void run() {
             try {
-                socket.setSoTimeout(180000); // 3분 무응답 시 자동 종료
+                socket.setSoTimeout(0); // 타임아웃 없음
                 BufferedReader in = new BufferedReader(
                         new InputStreamReader(socket.getInputStream(), "UTF-8"));
                 out = new PrintWriter(
@@ -384,7 +414,12 @@ public class ChatServer {
                 clients.put(nickname, out);
                 clientSockets.put(nickname, socket);
                 out.println("[서버] 환영합니다, " + nickname + "님!");
-                out.println("[서버] 명령어: /시작  /투표 [번호]  /강퇴 [닉네임]  /users  /quit");
+                if (nickname.equals(ADMIN_NAME)) {
+                    out.println("[서버] 명령어: /시작  /투표 [번호]  /강퇴 [닉네임]  /초기화  /스킵  /users  /quit");
+                    out.println("[서버] ★ 방장으로 입장했습니다! 강퇴·초기화·스킵 권한이 있습니다. ★");
+                } else {
+                    out.println("[서버] 명령어: /시작  /투표 [번호]  /users  /quit");
+                }
                 broadcast("[입장] " + nickname + "님 입장. (현재 " + clients.size() + "명)");
                 if (gamePhase != GamePhase.WAITING) {
                     out.println("[서버] ⚠ 당신은 대기자입니다. 게임이 끝날 때까지 기다려주세요.");
@@ -401,8 +436,26 @@ public class ChatServer {
                     } else if (line.equals("/users")) {
                         out.println(getUserList());
                     } else if (line.startsWith("/강퇴 ")) {
-                        String target = line.substring(4).trim();
-                        kickClient(target, nickname);
+                        if (!nickname.equals(ADMIN_NAME)) {
+                            out.println("[서버] 방장만 강퇴할 수 있습니다.");
+                        } else {
+                            String target = line.substring(4).trim();
+                            kickClient(target, nickname);
+                        }
+                    } else if (line.equals("/초기화")) {
+                        if (!nickname.equals(ADMIN_NAME)) {
+                            out.println("[서버] 방장만 사용할 수 있습니다.");
+                        } else {
+                            resetGame(nickname);
+                        }
+                    } else if (line.equals("/스킵")) {
+                        if (!nickname.equals(ADMIN_NAME)) {
+                            out.println("[서버] 방장만 사용할 수 있습니다.");
+                        } else {
+                            skipTurn(nickname);
+                        }
+                    } else if (line.equals("/ping")) {
+                        // heartbeat 무시
                     } else if (line.equals("/시작")) {
                         startGame(nickname);
                     } else if (line.startsWith("/투표 ")) {
