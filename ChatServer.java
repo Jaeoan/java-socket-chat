@@ -166,6 +166,11 @@ public class ChatServer {
     // ── 차례 스킵 (방장 전용) ──────────────────────────────────────────────────
     static void skipTurn(String requester) {
         synchronized (gameLock) {
+            if (gamePhase == GamePhase.VOTING) {
+                broadcast("[게임] 방장이 투표를 스킵했습니다. 현재 투표 결과를 공개합니다.");
+                revealResult();
+                return;
+            }
             if (gamePhase != GamePhase.DESCRIBING) {
                 sendTo(requester, "[서버] 설명 단계에서만 스킵할 수 있습니다.");
                 return;
@@ -246,6 +251,19 @@ public class ChatServer {
 
     // ── 결과 공개 ──────────────────────────────────────────────────────────────
     static void revealResult() {
+        if (votes.isEmpty()) {
+            broadcast("");
+            broadcast("[게임] 투표가 없어 결과를 집계할 수 없습니다.");
+            broadcast("[게임] 다시 하려면 /시작 을 입력하세요.");
+
+            gamePhase = GamePhase.WAITING;
+            playerOrder.clear();
+            votes.clear();
+            aiIndex = -1;
+            currentTurn = 0;
+            return;
+        }
+
         // 가장 많이 투표받은 번호 집계
         Map<Integer, Integer> tally = new HashMap<>();
         for (int v : votes.values()) tally.merge(v, 1, Integer::sum);
